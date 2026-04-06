@@ -1,0 +1,21 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual Environment
+venv/
+env/
+ENV/
+
+# Database (Keep your local testing data out of GitHub)
+*.sqlite3
+
+# Django sensitive settings
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+
+# Operating System files
+.DS_Store
+Thumbs.db
