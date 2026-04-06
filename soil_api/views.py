@@ -8,8 +8,6 @@ from .serializers import FarmPlotSerializer, FarmPlotListSerializer, SoilRecordS
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def current_user(request):
-    # This is your "User Endpoint"
-    # It returns the details of the person currently logged in
     return Response({
         "id": request.user.id,
         "username": request.user.username,
@@ -17,25 +15,23 @@ def current_user(request):
         "full_name": f"{request.user.first_name} {request.user.last_name}"
     })
 
-# --- PLOT MANAGEMENT (For your Farm Overview UI) ---
+# --- PLOT MANAGEMENT (For Farm Overview UI) ---
 @api_view(['GET', 'POST'])
 @permission_classes([IsAuthenticated])
 def plot_manager(request):
     if request.method == 'GET':
         plots = FarmPlot.objects.filter(farmer=request.user)
-        # Use the "List" (Lite) Serializer here
         serializer = FarmPlotListSerializer(plots, many=True)
         return Response(serializer.data)
 
     elif request.method == 'POST':
-        # Use the Full Serializer for creating so you can input all data
         serializer = FarmPlotSerializer(data=request.data)
         if serializer.is_valid():
             serializer.save(farmer=request.user)
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-@api_view(['GET', 'PUT', 'PATCH', 'DELETE']) # <--- Add 'PATCH' here
+@api_view(['GET', 'PUT', 'PATCH', 'DELETE'])
 @permission_classes([IsAuthenticated])
 def plot_detail_manager(request, pk):
     try:
@@ -47,8 +43,7 @@ def plot_detail_manager(request, pk):
         serializer = FarmPlotSerializer(plot)
         return Response(serializer.data)
 
-    elif request.method in ['PUT', 'PATCH']: # <--- Check for both here
-        # partial=True is what actually allows PATCH to work
+    elif request.method in ['PUT', 'PATCH']:
         serializer = FarmPlotSerializer(
             plot, 
             data=request.data, 
@@ -67,7 +62,6 @@ def plot_detail_manager(request, pk):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def record_data(request):
-    # This endpoint is specifically for the ESP32 to push live sensor data
     serializer = SoilRecordSerializer(data=request.data)
     if serializer.is_valid():
         serializer.save()
@@ -87,7 +81,6 @@ def record_detail_manager(request, pk):
         return Response(serializer.data)
 
     elif request.method in ['PUT', 'PATCH']:
-        # partial=True allows PATCH to work
         serializer = SoilRecordSerializer(record, data=request.data, partial=(request.method == 'PATCH'))
         if serializer.is_valid():
             serializer.save()

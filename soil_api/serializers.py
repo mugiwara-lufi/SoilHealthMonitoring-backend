@@ -10,7 +10,7 @@ class SoilRecordSerializer(serializers.ModelSerializer):
 class FarmPlotListSerializer(serializers.ModelSerializer):
     class Meta:
         model = FarmPlot
-        fields = ['id', 'name', 'crop_type'] # Only shows these three fields
+        fields = ['id', 'name', 'crop_type']
 
 # 2. "Full" Serializer for the Plot Detail
 class FarmPlotSerializer(serializers.ModelSerializer):

@@ -16,7 +16,7 @@ class SoilRecord(models.Model):
     soil_moisture = models.FloatField()
     soil_temperature = models.FloatField()
     ph_level = models.FloatField()
-    battery_percentage = models.IntegerField() # Added this for your live monitoring
+    battery_percentage = models.IntegerField()
     timestamp = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
