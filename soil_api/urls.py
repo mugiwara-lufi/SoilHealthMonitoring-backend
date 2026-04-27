@@ -13,4 +13,8 @@ urlpatterns = [
     path('records/<int:pk>/', views.record_detail_manager, name='record-detail'),
 
     path('user/', views.current_user, name='current-user'),
+
+    # 4. User Registration Endpoint
+    path('register/', views.register_user_web, name='register-user'),
+    
 ]

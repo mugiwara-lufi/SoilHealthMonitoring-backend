@@ -16,8 +16,10 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path, include
+from soil_api.views import home_screen
 
 urlpatterns = [
+    path('', home_screen, name='home'),
     path('admin/', admin.site.urls),
     path('api/auth/', include('rest_framework.urls')), 
     path('api/', include('soil_api.urls')), 

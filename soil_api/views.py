@@ -4,6 +4,47 @@ from rest_framework.response import Response
 from rest_framework import status
 from .models import FarmPlot, SoilRecord
 from .serializers import FarmPlotSerializer, FarmPlotListSerializer, SoilRecordSerializer
+from rest_framework.decorators import permission_classes
+from rest_framework.permissions import AllowAny
+from .serializers import RegisterSerializer
+from django.shortcuts import render
+from django.shortcuts import render, redirect
+from django.contrib.auth import login
+from .forms import UserRegistrationForm # Import the form we just created
+
+# --- HOME SCREEN VIEW ---
+def home_screen(request):
+    return render(request, 'home.html')
+
+# --- WEB-BASED REGISTRATION VIEW (The Fill-up Form) ---
+def register_user_web(request):
+    if request.method == 'POST':
+        form = UserRegistrationForm(request.POST)
+        if form.is_valid():
+            user = form.save(commit=False)
+            user.set_password(form.cleaned_data['password']) # Hashes password
+            user.save()
+            login(request, user) # Auto-login after registration
+            return redirect('plot-list') 
+    else:
+        form = UserRegistrationForm()
+    return render(request, 'register_web.html', {'form': form})
+
+def home_screen(request):
+    return render(request, 'home.html')
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def register_user(request):
+    serializer = RegisterSerializer(data=request.data)
+    if serializer.is_valid():
+        serializer.save()
+        return Response({
+            "message": "User created successfully",
+            "user": serializer.data
+        }, status=status.HTTP_201_CREATED)
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
