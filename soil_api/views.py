@@ -1,46 +1,51 @@
-from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated
+from django.views.decorators.csrf import csrf_exempt
+from rest_framework.decorators import api_view, permission_classes, authentication_classes
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework import status
-from .models import FarmPlot, SoilRecord
-from .serializers import FarmPlotSerializer, FarmPlotListSerializer, SoilRecordSerializer
-from rest_framework.decorators import permission_classes
-from rest_framework.permissions import AllowAny
-from .serializers import RegisterSerializer
-from django.shortcuts import render
 from django.shortcuts import render, redirect
 from django.contrib.auth import login
-from .forms import UserRegistrationForm # Import the form we just created
+
+# Explicitly import these to ensure we can override defaults
+from rest_framework.authentication import TokenAuthentication, BasicAuthentication
+
+from .models import FarmPlot, SoilRecord
+from .serializers import (
+    FarmPlotSerializer, 
+    FarmPlotListSerializer, 
+    SoilRecordSerializer, 
+    RegisterSerializer
+)
+from .forms import UserRegistrationForm
 
 # --- HOME SCREEN VIEW ---
 def home_screen(request):
     return render(request, 'home.html')
 
-# --- WEB-BASED REGISTRATION VIEW (The Fill-up Form) ---
+# --- WEB-BASED REGISTRATION VIEW (Standard Form) ---
 def register_user_web(request):
     if request.method == 'POST':
         form = UserRegistrationForm(request.POST)
         if form.is_valid():
             user = form.save(commit=False)
-            user.set_password(form.cleaned_data['password']) # Hashes password
+            user.set_password(form.cleaned_data['password'])
             user.save()
-            login(request, user) # Auto-login after registration
+            login(request, user)
             return redirect('plot-list') 
     else:
         form = UserRegistrationForm()
     return render(request, 'register_web.html', {'form': form})
 
-
+# --- MOBILE API REGISTRATION VIEW ---
+@csrf_exempt
 @api_view(['POST'])
+@authentication_classes([]) # Force Django to ignore Session/CSRF checks
 @permission_classes([AllowAny])
 def register_user(request):
     serializer = RegisterSerializer(data=request.data)
     if serializer.is_valid():
         serializer.save()
-        return Response({
-            "message": "User created successfully",
-            "user": serializer.data
-        }, status=status.HTTP_201_CREATED)
+        return Response({"message": "User created"}, status=status.HTTP_201_CREATED)
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 @api_view(['GET'])
@@ -53,13 +58,12 @@ def current_user(request):
         "full_name": f"{request.user.first_name} {request.user.last_name}"
     })
 
-# --- PLOT MANAGEMENT (For Farm Overview UI) ---
+# --- PLOT MANAGEMENT ---
 @api_view(['GET', 'POST'])
 @permission_classes([IsAuthenticated])
 def plot_manager(request):
     if request.method == 'GET':
         plots = FarmPlot.objects.filter(farmer=request.user)
-        # CHANGE THIS: Use FarmPlotSerializer instead of FarmPlotListSerializer
         serializer = FarmPlotSerializer(plots, many=True) 
         return Response(serializer.data)
 
@@ -97,7 +101,7 @@ def plot_detail_manager(request, pk):
         plot.delete()
         return Response({"message": "Plot removed"}, status=status.HTTP_204_NO_CONTENT)
 
-# --- SENSOR DATA INGESTION (For the ESP32) ---
+# --- SENSOR DATA INGESTION ---
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def record_data(request):

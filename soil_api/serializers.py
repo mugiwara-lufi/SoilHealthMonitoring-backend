@@ -10,7 +10,6 @@ class RegisterSerializer(serializers.ModelSerializer):
         fields = ('username', 'password', 'email', 'first_name', 'last_name')
 
     def create(self, validated_data):
-        # use create_user to ensure the password is encrypted/hashed
         user = User.objects.create_user(
             username=validated_data['username'],
             password=validated_data['password'],
@@ -25,18 +24,18 @@ class SoilRecordSerializer(serializers.ModelSerializer):
         model = SoilRecord
         fields = '__all__'
 
-# 1. New "Lite" Serializer for the Plot List
 class FarmPlotListSerializer(serializers.ModelSerializer):
     class Meta:
         model = FarmPlot
         fields = ['id', 'name', 'crop_type']
 
-# 2. "Full" Serializer for the Plot Detail
 class FarmPlotSerializer(serializers.ModelSerializer):
     records = SoilRecordSerializer(many=True, read_only=True)
+    # ADD THIS LINE: It grabs the username from the related User model
+    farmer_username = serializers.CharField(source='farmer.username', read_only=True)
 
     class Meta:
         model = FarmPlot
-        # Add farmer to read_only_fields
-        fields = ['id', 'farmer', 'name', 'crop_type', 'sensor_id', 'location', 'records']
+        # Add 'farmer_username' to the fields list
+        fields = ['id', 'farmer', 'farmer_username', 'name', 'crop_type', 'sensor_id', 'location', 'records']
         read_only_fields = ['farmer']
