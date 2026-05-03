@@ -37,4 +37,6 @@ class FarmPlotSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = FarmPlot
+        # Add farmer to read_only_fields
         fields = ['id', 'farmer', 'name', 'crop_type', 'sensor_id', 'location', 'records']
+        read_only_fields = ['farmer']

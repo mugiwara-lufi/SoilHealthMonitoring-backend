@@ -30,9 +30,6 @@ def register_user_web(request):
         form = UserRegistrationForm()
     return render(request, 'register_web.html', {'form': form})
 
-def home_screen(request):
-    return render(request, 'home.html')
-
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
@@ -62,7 +59,8 @@ def current_user(request):
 def plot_manager(request):
     if request.method == 'GET':
         plots = FarmPlot.objects.filter(farmer=request.user)
-        serializer = FarmPlotListSerializer(plots, many=True)
+        # CHANGE THIS: Use FarmPlotSerializer instead of FarmPlotListSerializer
+        serializer = FarmPlotSerializer(plots, many=True) 
         return Response(serializer.data)
 
     elif request.method == 'POST':
