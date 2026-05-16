@@ -17,6 +17,7 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path, include
 from rest_framework.authtoken import views as auth_views
+from soil_api.views import home_screen
 
 urlpatterns = [
     path('', home_screen, name='home'),
