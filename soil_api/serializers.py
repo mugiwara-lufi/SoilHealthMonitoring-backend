@@ -6,7 +6,7 @@ class SoilRecordSerializer(serializers.ModelSerializer):
         model = SoilRecord
         fields = '__all__'
 
-# 1. New "Lite" Serializer for the Plot List
+# 1. "Lite" Serializer for the Plot List
 class FarmPlotListSerializer(serializers.ModelSerializer):
     class Meta:
         model = FarmPlot
