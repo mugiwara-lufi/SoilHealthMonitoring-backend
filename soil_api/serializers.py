@@ -24,7 +24,7 @@ class SoilRecordSerializer(serializers.ModelSerializer):
         model = SoilRecord
         fields = '__all__'
 
-# 1. "Lite" Serializer for the Plot List
+# "Lite" Serializer for the Plot List
 class FarmPlotListSerializer(serializers.ModelSerializer):
     class Meta:
         model = FarmPlot
@@ -32,11 +32,10 @@ class FarmPlotListSerializer(serializers.ModelSerializer):
 
 class FarmPlotSerializer(serializers.ModelSerializer):
     records = SoilRecordSerializer(many=True, read_only=True)
-    # ADD THIS LINE: It grabs the username from the related User model
     farmer_username = serializers.CharField(source='farmer.username', read_only=True)
+    sensor_id = serializers.CharField(required=False, allow_null=True, allow_blank=True)
 
     class Meta:
         model = FarmPlot
-        # Add 'farmer_username' to the fields list
         fields = ['id', 'farmer', 'farmer_username', 'name', 'crop_type', 'sensor_id', 'location', 'records']
         read_only_fields = ['farmer']
