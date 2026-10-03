@@ -1,7 +1,6 @@
 from django.contrib import admin
 from .models import FarmPlot, SoilRecord
 
-# Register your models here
 @admin.register(FarmPlot)
 class FarmPlotAdmin(admin.ModelAdmin):
     list_display = ('id', 'name', 'crop_type', 'farmer', 'sensor_id')
@@ -9,5 +8,9 @@ class FarmPlotAdmin(admin.ModelAdmin):
 
 @admin.register(SoilRecord)
 class SoilRecordAdmin(admin.ModelAdmin):
-    list_display = ('id', 'plot', 'soil_moisture', 'soil_temperature', 'timestamp')
+    list_display = (
+        'id', 'plot', 'soil_moisture', 'soil_temperature', 
+        'humidity', 'ph_level', 'nitrogen', 'phosphorus', 
+        'potassium', 'battery_percentage', 'timestamp'
+    )
     list_filter = ('plot', 'timestamp')

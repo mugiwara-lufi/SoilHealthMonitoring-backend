@@ -2,6 +2,7 @@ from rest_framework import serializers
 from .models import FarmPlot, SoilRecord
 from django.contrib.auth.models import User
 
+
 class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True)
 
@@ -19,10 +20,16 @@ class RegisterSerializer(serializers.ModelSerializer):
         )
         return user
 
+
 class SoilRecordSerializer(serializers.ModelSerializer):
     class Meta:
         model = SoilRecord
-        fields = '__all__'
+        fields = [
+            'id', 'plot', 'soil_moisture', 'soil_temperature', 
+            'humidity', 'ph_level', 'nitrogen', 'phosphorus', 
+            'potassium', 'battery_percentage', 'timestamp'
+        ]
+
 
 # "Lite" Serializer for the Plot List
 class FarmPlotListSerializer(serializers.ModelSerializer):
@@ -30,8 +37,9 @@ class FarmPlotListSerializer(serializers.ModelSerializer):
         model = FarmPlot
         fields = ['id', 'name', 'crop_type']
 
+
 class FarmPlotSerializer(serializers.ModelSerializer):
-    records = SoilRecordSerializer(many=True, read_only=True)
+    records = serializers.SerializerMethodField()
     farmer_username = serializers.CharField(source='farmer.username', read_only=True)
     sensor_id = serializers.CharField(required=False, allow_null=True, allow_blank=True)
 
@@ -39,3 +47,8 @@ class FarmPlotSerializer(serializers.ModelSerializer):
         model = FarmPlot
         fields = ['id', 'farmer', 'farmer_username', 'name', 'crop_type', 'sensor_id', 'location', 'records']
         read_only_fields = ['farmer']
+
+    def get_records(self, obj):
+        # Fetch records sorted by NEWEST first, limiting to the last 20 entries
+        recent_records = obj.records.order_by('-timestamp')[:20]
+        return SoilRecordSerializer(recent_records, many=True).data
