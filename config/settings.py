@@ -10,7 +10,12 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
+import os
 from pathlib import Path
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -32,13 +37,14 @@ ALLOWED_HOSTS = ['*']
 
 INSTALLED_APPS = [
     'django.contrib.admin',
+    'django_mongodb_backend',
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'rest_framework',
-    'soil_api',
+    'soil_api.apps.SoilApiConfig',
     'corsheaders',
     'rest_framework.authtoken',
 ]
@@ -90,10 +96,12 @@ WSGI_APPLICATION = 'config.wsgi.application'
 
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'ENGINE': 'django_mongodb_backend',
+        'NAME': 'soil_health_db',
+        'HOST': os.getenv('MONGO_URI'),
     }
-}
+}   
+
 
 
 # Password validation
@@ -133,3 +141,15 @@ USE_TZ = True
 STATIC_URL = 'static/'
 
 CORS_ALLOW_ALL_ORIGINS = True
+
+DEFAULT_AUTO_FIELD = 'django_mongodb_backend.fields.ObjectIdAutoField'
+
+# Override default_auto_field for Django's built-in apps
+from django.contrib.admin.apps import AdminConfig
+from django.contrib.auth.apps import AuthConfig
+from django.contrib.contenttypes.apps import ContentTypesConfig
+
+AdminConfig.default_auto_field = 'django_mongodb_backend.fields.ObjectIdAutoField'
+AuthConfig.default_auto_field = 'django_mongodb_backend.fields.ObjectIdAutoField'
+ContentTypesConfig.default_auto_field = 'django_mongodb_backend.fields.ObjectIdAutoField'
+
