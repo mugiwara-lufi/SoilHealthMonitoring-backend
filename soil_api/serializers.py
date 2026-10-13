@@ -1,6 +1,49 @@
 from rest_framework import serializers
-from .models import FarmPlot, SoilRecord
+from .models import FarmPlot, SoilRecord, UserProfile
 from django.contrib.auth.models import User
+
+
+class UserSerializer(serializers.ModelSerializer):
+    name = serializers.SerializerMethodField()
+    role = serializers.SerializerMethodField()
+    password = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    created_by = serializers.SerializerMethodField()
+
+    class Meta:
+        model = User
+        fields = [
+            'id', 'username', 'password', 'name', 'email', 
+            'role', 'is_active', 'is_staff', 'is_superuser', 'created_by'
+        ]
+
+    def get_name(self, obj):
+        full_name = f"{obj.first_name} {obj.last_name}".strip()
+        return full_name if full_name else obj.username
+
+    def get_role(self, obj):
+        return 'ADMIN' if (obj.is_staff or obj.is_superuser) else 'FARMER'
+
+    def get_created_by(self, obj):
+        if hasattr(obj, 'profile') and obj.profile.created_by:
+            return obj.profile.created_by.id
+        return None
+
+    def create(self, validated_data):
+        password = validated_data.pop('password', None)
+        user = User.objects.create(**validated_data)
+        if password:
+            user.set_password(password)
+            user.save()
+        return user
+
+    def update(self, instance, validated_data):
+        password = validated_data.pop('password', None)
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        if password:
+            instance.set_password(password)
+        instance.save()
+        return instance
 
 
 class RegisterSerializer(serializers.ModelSerializer):
@@ -31,7 +74,6 @@ class SoilRecordSerializer(serializers.ModelSerializer):
         ]
 
 
-# "Lite" Serializer for the Plot List
 class FarmPlotListSerializer(serializers.ModelSerializer):
     class Meta:
         model = FarmPlot
@@ -49,6 +91,5 @@ class FarmPlotSerializer(serializers.ModelSerializer):
         read_only_fields = ['farmer']
 
     def get_records(self, obj):
-        # Fetch records sorted by NEWEST first, limiting to the last 20 entries
-        recent_records = obj.records.order_by('-timestamp')[:20]
+        recent_records = obj.records.all()[:20]
         return SoilRecordSerializer(recent_records, many=True).data

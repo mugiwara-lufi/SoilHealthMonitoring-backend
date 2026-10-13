@@ -1,28 +1,100 @@
 from django.views.decorators.csrf import csrf_exempt
-from rest_framework.decorators import api_view, permission_classes, authentication_classes
+from rest_framework.decorators import api_view, permission_classes, authentication_classes, action
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
-from rest_framework import status
+from rest_framework import status, viewsets, permissions
 from django.shortcuts import render, redirect
 from django.contrib.auth import login
 from django.utils import timezone
 from datetime import timedelta
-from django.db.models import Avg, Prefetch
+from django.db.models import Avg, Prefetch, Q
 from django.db.models.functions import TruncDay, TruncHour
+from django.contrib.auth.models import User
 
-from .models import FarmPlot, SoilRecord
+from rest_framework.authtoken.views import ObtainAuthToken
+from rest_framework.authtoken.models import Token
+
+from .models import FarmPlot, SoilRecord, UserProfile
 from .serializers import (
+    UserSerializer,
     FarmPlotSerializer, 
     SoilRecordSerializer, 
     RegisterSerializer
 )
 from .forms import UserRegistrationForm
 
-# --- HOME SCREEN VIEW ---
+
+class CustomObtainAuthToken(ObtainAuthToken):
+    def post(self, request, *args, **kwargs):
+        serializer = self.serializer_class(
+            data=request.data, 
+            context={'request': request}
+        )
+        serializer.is_valid(raise_exception=True)
+        user = serializer.validated_data['user']
+        token, created = Token.objects.get_or_create(user=user)
+
+        role = 'admin' if (user.is_staff or user.is_superuser) else 'user'
+
+        return Response({
+            'token': token.key,
+            'user_id': user.pk,
+            'username': user.username,
+            'email': user.email,
+            'is_staff': user.is_staff or user.is_superuser,
+            'role': role
+        })
+
+
+class UserViewSet(viewsets.ModelViewSet):
+    serializer_class = UserSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        user = self.request.user
+        if user.is_superuser:
+            return User.objects.all().order_by('-date_joined')
+        
+        created_user_ids = UserProfile.objects.filter(created_by=user).values_list('user_id', flat=True)
+        return User.objects.filter(
+            Q(id__in=created_user_ids) | Q(id=user.id)
+        ).distinct().order_by('-date_joined')
+
+    def perform_create(self, serializer):
+        created_user = serializer.save()
+        UserProfile.objects.create(user=created_user, created_by=self.request.user)
+
+    @action(detail=True, methods=['post'], url_path='assign-plots')
+    def assign_plots(self, request, pk=None):
+        target_user = self.get_object()
+        plot_ids = request.data.get('plot_ids', [])
+
+        if not isinstance(plot_ids, list):
+            return Response(
+                {'error': 'plot_ids must be a list of integers.'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if request.user.is_superuser:
+            plots = FarmPlot.objects.filter(id__in=plot_ids)
+        else:
+            created_user_ids = UserProfile.objects.filter(created_by=request.user).values_list('user_id', flat=True)
+            plots = FarmPlot.objects.filter(
+                Q(id__in=plot_ids) & (Q(farmer=request.user) | Q(farmer_id__in=created_user_ids))
+            )
+
+        updated_count = plots.update(farmer=target_user)
+
+        return Response({
+            'message': f'Successfully assigned {updated_count} plot(s) to {target_user.username}.',
+            'assigned_plot_ids': list(plots.values_list('id', flat=True))
+        }, status=status.HTTP_200_OK)
+
+
 def home_screen(request):
     return render(request, 'home.html')
 
-# --- WEB REGISTRATION VIEW ---
+
 def register_user_web(request):
     if request.method == 'POST':
         form = UserRegistrationForm(request.POST)
@@ -30,13 +102,14 @@ def register_user_web(request):
             user = form.save(commit=False)
             user.set_password(form.cleaned_data['password'])
             user.save()
+            UserProfile.objects.get_or_create(user=user)
             login(request, user)
             return redirect('plot-list') 
     else:
         form = UserRegistrationForm()
     return render(request, 'register_web.html', {'form': form})
 
-# --- MOBILE API REGISTRATION VIEW ---
+
 @csrf_exempt
 @api_view(['POST'])
 @authentication_classes([])
@@ -44,35 +117,41 @@ def register_user_web(request):
 def register_user(request):
     serializer = RegisterSerializer(data=request.data)
     if serializer.is_valid():
-        serializer.save()
-        return Response({"message": "User created"}, status=status.HTTP_201_CREATED)
+        user = serializer.save()
+        creator = request.user if (request.user and request.user.is_authenticated) else None
+        UserProfile.objects.create(user=user, created_by=creator)
+        return Response({"message": "User created", "id": user.id}, status=status.HTTP_201_CREATED)
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def current_user(request):
+    role = 'admin' if (request.user.is_staff or request.user.is_superuser) else 'user'
     return Response({
         "id": request.user.id,
         "username": request.user.username,
         "email": request.user.email,
-        "full_name": f"{request.user.first_name} {request.user.last_name}"
+        "full_name": f"{request.user.first_name} {request.user.last_name}".strip(),
+        "role": role
     })
 
-# --- PLOT MANAGEMENT ---
-@api_view(['GET', 'POST'])
-@permission_classes([AllowAny])  # Set to AllowAny or IsAuthenticated depending on your auth strategy
-def plot_manager(request):
-    if request.method == 'GET':
-        # Prefetch soil records sorted newest-first so records[0] in frontend is always the latest update
-        records_prefetch = Prefetch(
-            'records',
-            queryset=SoilRecord.objects.order_by('-timestamp')
-        )
 
-        if request.user.is_authenticated:
-            plots = FarmPlot.objects.filter(farmer=request.user).prefetch_related(records_prefetch)
-        else:
+@api_view(['GET', 'POST'])
+@permission_classes([IsAuthenticated])
+def plot_manager(request):
+    records_prefetch = Prefetch('records', queryset=SoilRecord.objects.order_by('-timestamp'))
+
+    if request.method == 'GET':
+        if request.user.is_superuser:
             plots = FarmPlot.objects.all().prefetch_related(records_prefetch)
+        elif request.user.is_staff:
+            managed_user_ids = UserProfile.objects.filter(created_by=request.user).values_list('user_id', flat=True)
+            plots = FarmPlot.objects.filter(
+                Q(farmer=request.user) | Q(farmer_id__in=managed_user_ids)
+            ).prefetch_related(records_prefetch)
+        else:
+            plots = FarmPlot.objects.filter(farmer=request.user).prefetch_related(records_prefetch)
 
         serializer = FarmPlotSerializer(plots, many=True) 
         return Response(serializer.data)
@@ -80,20 +159,44 @@ def plot_manager(request):
     elif request.method == 'POST':
         serializer = FarmPlotSerializer(data=request.data)
         if serializer.is_valid():
-            farmer_user = request.user if request.user.is_authenticated else None
-            serializer.save(farmer=farmer_user)
+            serializer.save(farmer=request.user)
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def admin_manageable_plots(request):
+    records_prefetch = Prefetch('records', queryset=SoilRecord.objects.order_by('-timestamp'))
+    if request.user.is_superuser:
+        plots = FarmPlot.objects.all().prefetch_related(records_prefetch)
+    else:
+        created_user_ids = UserProfile.objects.filter(created_by=request.user).values_list('user_id', flat=True)
+        plots = FarmPlot.objects.filter(
+            Q(farmer=request.user) | Q(farmer_id__in=created_user_ids)
+        ).prefetch_related(records_prefetch)
+
+    serializer = FarmPlotSerializer(plots, many=True)
+    return Response(serializer.data)
+
+
 @api_view(['GET', 'PUT', 'PATCH', 'DELETE'])
-@permission_classes([AllowAny])  # Allows public PATCH / GET updates for testing
+@permission_classes([IsAuthenticated])
 def plot_detail_manager(request, pk):
     try:
-        # Sort pre-fetched records newest-first for the detail view as well
         records_prefetch = Prefetch('records', queryset=SoilRecord.objects.order_by('-timestamp'))
         plot = FarmPlot.objects.prefetch_related(records_prefetch).get(pk=pk)
     except FarmPlot.DoesNotExist:
         return Response({"error": "Plot not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    # Permission check: superusers, plot owners, or managing admins
+    is_owner = plot.farmer == request.user
+    is_managing_admin = False
+    if hasattr(plot.farmer, 'profile') and plot.farmer.profile.created_by == request.user:
+        is_managing_admin = True
+
+    if not (request.user.is_superuser or is_owner or is_managing_admin):
+        return Response({"error": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
 
     if request.method == 'GET':
         serializer = FarmPlotSerializer(plot)
@@ -114,7 +217,7 @@ def plot_detail_manager(request, pk):
         plot.delete()
         return Response({"message": "Plot removed"}, status=status.HTTP_204_NO_CONTENT)
 
-# --- SENSOR DATA INGESTION ---
+
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def record_data(request):
@@ -124,8 +227,9 @@ def record_data(request):
         return Response(serializer.data, status=status.HTTP_201_CREATED)
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+
 @api_view(['GET', 'PUT', 'PATCH', 'DELETE'])
-@permission_classes([AllowAny])
+@permission_classes([IsAuthenticated])
 def record_detail_manager(request, pk):
     try:
         record = SoilRecord.objects.get(pk=pk)
@@ -147,15 +251,14 @@ def record_detail_manager(request, pk):
         record.delete()
         return Response({"message": "Record deleted"}, status=status.HTTP_204_NO_CONTENT)
 
-# --- ANALYTICS ENDPOINT ---
+
 @api_view(['GET'])
-@permission_classes([AllowAny])
+@permission_classes([IsAuthenticated])
 def get_ph_analytics(request, plot_id):
     now = timezone.now()
     seven_days_ago = now - timedelta(days=7)
     twenty_four_hours_ago = now - timedelta(hours=24)
 
-    # 1. Weekly pH
     weekly_records = (
         SoilRecord.objects.filter(plot_id=plot_id, timestamp__gte=seven_days_ago)
         .annotate(day=TruncDay('timestamp'))
@@ -177,7 +280,6 @@ def get_ph_analytics(request, plot_id):
         weekly_labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
         weekly_values = [4.0, 4.5, 5.5, 6.2, 6.5, 6.8, 7.6]
 
-    # 2. Hourly pH
     hourly_records = (
         SoilRecord.objects.filter(plot_id=plot_id, timestamp__gte=twenty_four_hours_ago)
         .annotate(hour=TruncHour('timestamp'))

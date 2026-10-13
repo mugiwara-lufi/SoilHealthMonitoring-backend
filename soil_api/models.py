@@ -1,8 +1,23 @@
 from django.db import models
 from django.contrib.auth.models import User
 
+# Profile extension to store user hierarchy safely without monkey-patching User
+class UserProfile(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
+    created_by = models.ForeignKey(
+        User, 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True, 
+        related_name='created_profiles'
+    )
+
+    def __str__(self):
+        return f"Profile for {self.user.username}"
+
+
 class FarmPlot(models.Model):
-    farmer = models.ForeignKey(User, on_delete=models.CASCADE)
+    farmer = models.ForeignKey(User, on_delete=models.CASCADE, related_name='farm_plots')
     name = models.CharField(max_length=100)
     crop_type = models.CharField(max_length=100)
     sensor_id = models.CharField(max_length=50, blank=True, null=True)
@@ -10,6 +25,7 @@ class FarmPlot(models.Model):
 
     def __str__(self):
         return f"{self.name} ({self.sensor_id or 'No Sensor'})"
+
 
 class SoilRecord(models.Model):
     plot = models.ForeignKey(FarmPlot, on_delete=models.CASCADE, related_name='records')
@@ -24,7 +40,7 @@ class SoilRecord(models.Model):
     timestamp = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        ordering = ['-timestamp']  # Automatically orders all queries newest-first
+        ordering = ['-timestamp']
 
     def __str__(self):
         return f"Update for {self.plot.name} at {self.timestamp}"

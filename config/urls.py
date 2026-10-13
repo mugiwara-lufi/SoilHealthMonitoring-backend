@@ -16,13 +16,12 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path, include
-from rest_framework.authtoken import views as auth_views
-from soil_api.views import home_screen
+from soil_api.views import home_screen, CustomObtainAuthToken
 
 urlpatterns = [
     path('', home_screen, name='home'),
     path('admin/', admin.site.urls),
     path('api/auth/', include('rest_framework.urls')),
-    path('api/api-token-auth/', auth_views.obtain_auth_token), 
+    path('api/api-token-auth/', CustomObtainAuthToken.as_view(), name='main-api-token-auth'), 
     path('api/', include('soil_api.urls')), 
 ]
