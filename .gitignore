@@ -19,3 +19,5 @@ db.sqlite3-journal
 # Operating System files
 .DS_Store
 Thumbs.db
+
+.env

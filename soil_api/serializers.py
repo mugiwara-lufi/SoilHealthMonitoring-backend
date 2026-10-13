@@ -7,13 +7,14 @@ class UserSerializer(serializers.ModelSerializer):
     name = serializers.SerializerMethodField()
     role = serializers.SerializerMethodField()
     password = serializers.CharField(write_only=True, required=False, allow_blank=True)
-    created_by = serializers.SerializerMethodField()
+    owner_id = serializers.SerializerMethodField()
+    owner_username = serializers.SerializerMethodField()
 
     class Meta:
         model = User
         fields = [
             'id', 'username', 'password', 'name', 'email', 
-            'role', 'is_active', 'is_staff', 'is_superuser', 'created_by'
+            'role', 'is_active', 'is_staff', 'is_superuser', 'owner_id', 'owner_username'
         ]
 
     def get_name(self, obj):
@@ -23,9 +24,14 @@ class UserSerializer(serializers.ModelSerializer):
     def get_role(self, obj):
         return 'ADMIN' if (obj.is_staff or obj.is_superuser) else 'FARMER'
 
-    def get_created_by(self, obj):
-        if hasattr(obj, 'profile') and obj.profile.created_by:
-            return obj.profile.created_by.id
+    def get_owner_id(self, obj):
+        if hasattr(obj, 'profile') and obj.profile.owner:
+            return obj.profile.owner.id
+        return None
+
+    def get_owner_username(self, obj):
+        if hasattr(obj, 'profile') and obj.profile.owner:
+            return obj.profile.owner.username
         return None
 
     def create(self, validated_data):
@@ -48,12 +54,14 @@ class UserSerializer(serializers.ModelSerializer):
 
 class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True)
+    owner_email = serializers.EmailField(required=False, allow_blank=True, write_only=True)
 
     class Meta:
         model = User
-        fields = ('username', 'password', 'email', 'first_name', 'last_name')
+        fields = ('username', 'password', 'email', 'first_name', 'last_name', 'owner_email')
 
     def create(self, validated_data):
+        owner_email = validated_data.pop('owner_email', None)
         user = User.objects.create_user(
             username=validated_data['username'],
             password=validated_data['password'],
@@ -61,6 +69,17 @@ class RegisterSerializer(serializers.ModelSerializer):
             first_name=validated_data.get('first_name', ''),
             last_name=validated_data.get('last_name', '')
         )
+
+        # Handle owner inheritance if an owner email was provided
+        if owner_email:
+            try:
+                owner_user = User.objects.get(email=owner_email)
+                if hasattr(user, 'profile'):
+                    user.profile.owner = owner_user
+                    user.profile.save()
+            except User.DoesNotExist:
+                pass  # You can handle or raise validation error here if the email doesn't exist
+
         return user
 
 
