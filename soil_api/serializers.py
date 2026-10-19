@@ -70,7 +70,6 @@ class RegisterSerializer(serializers.ModelSerializer):
             last_name=validated_data.get('last_name', '')
         )
 
-        # Handle owner inheritance if an owner email was provided
         if owner_email:
             try:
                 owner_user = User.objects.get(email=owner_email)
@@ -78,7 +77,7 @@ class RegisterSerializer(serializers.ModelSerializer):
                     user.profile.owner = owner_user
                     user.profile.save()
             except User.DoesNotExist:
-                pass  # You can handle or raise validation error here if the email doesn't exist
+                pass 
 
         return user
 
@@ -88,7 +87,7 @@ class SoilRecordSerializer(serializers.ModelSerializer):
         model = SoilRecord
         fields = [
             'id', 'plot', 'soil_moisture', 'soil_temperature', 
-            'humidity', 'ph_level', 'nitrogen', 'phosphorus', 
+            'ec', 'ph_level', 'nitrogen', 'phosphorus', 
             'potassium', 'battery_percentage', 'timestamp'
         ]
 

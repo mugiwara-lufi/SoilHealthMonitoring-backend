@@ -15,6 +15,9 @@ urlpatterns = [
 
     path('records/add/', views.record_data, name='add-sensor-data'),
     path('records/<int:pk>/', views.record_detail_manager, name='record-detail'),
+    
+    # New endpoint pointing to the Supabase fetch view
+    path('soil-records/', views.get_supabase_records, name='supabase-soil-records'),
 
     path('user/', views.current_user, name='current-user'),
 

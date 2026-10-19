@@ -10,7 +10,7 @@ class FarmPlotAdmin(admin.ModelAdmin):
 class SoilRecordAdmin(admin.ModelAdmin):
     list_display = (
         'id', 'plot', 'soil_moisture', 'soil_temperature', 
-        'humidity', 'ph_level', 'nitrogen', 'phosphorus', 
+        'ec', 'ph_level', 'nitrogen', 'phosphorus', 
         'potassium', 'battery_percentage', 'timestamp'
     )
     list_filter = ('plot', 'timestamp')

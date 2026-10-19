@@ -3,7 +3,6 @@ from django.contrib.auth.models import User
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 
-# Profile extension to store user hierarchy safely without monkey-patching User
 class UserProfile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
     owner = models.ForeignKey(
@@ -33,7 +32,7 @@ class SoilRecord(models.Model):
     plot = models.ForeignKey(FarmPlot, on_delete=models.CASCADE, related_name='records')
     soil_moisture = models.FloatField()
     soil_temperature = models.FloatField()
-    humidity = models.FloatField(default=0.0)
+    ec = models.FloatField(default=0.0)  # Replaced humidity with Electrical Conductivity (EC)
     ph_level = models.FloatField()
     nitrogen = models.FloatField(default=0.0)
     phosphorus = models.FloatField(default=0.0)
@@ -48,7 +47,6 @@ class SoilRecord(models.Model):
         return f"Update for {self.plot.name} at {self.timestamp}"
 
 
-# Automatically create a UserProfile whenever a new User is registered
 @receiver(post_save, sender=User)
 def create_user_profile(sender, instance, created, **kwargs):
     if created:
