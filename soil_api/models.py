@@ -11,7 +11,7 @@ class UserProfile(models.Model):
         null=True, 
         blank=True, 
         related_name='sub_farmers'
-    )   
+    ) 
 
     def __str__(self):
         return f"Profile for {self.user.username}"
@@ -32,7 +32,7 @@ class SoilRecord(models.Model):
     plot = models.ForeignKey(FarmPlot, on_delete=models.CASCADE, related_name='records')
     soil_moisture = models.FloatField()
     soil_temperature = models.FloatField()
-    ec = models.FloatField(default=0.0)  # Replaced humidity with Electrical Conductivity (EC)
+    ec = models.FloatField(default=0.0) 
     ph_level = models.FloatField()
     nitrogen = models.FloatField(default=0.0)
     phosphorus = models.FloatField(default=0.0)
@@ -50,4 +50,4 @@ class SoilRecord(models.Model):
 @receiver(post_save, sender=User)
 def create_user_profile(sender, instance, created, **kwargs):
     if created:
-        UserProfile.objects.create(user=instance)
+        UserProfile.objects.get_or_create(user=instance)

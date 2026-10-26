@@ -62,6 +62,8 @@ class RegisterSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         owner_email = validated_data.pop('owner_email', None)
+        
+        # Create the standard Django user
         user = User.objects.create_user(
             username=validated_data['username'],
             password=validated_data['password'],
@@ -70,12 +72,13 @@ class RegisterSerializer(serializers.ModelSerializer):
             last_name=validated_data.get('last_name', '')
         )
 
+        # Handle Farm Owner linking for plot inheritance
+        profile, _ = UserProfile.objects.get_or_create(user=user)
         if owner_email:
             try:
                 owner_user = User.objects.get(email=owner_email)
-                if hasattr(user, 'profile'):
-                    user.profile.owner = owner_user
-                    user.profile.save()
+                profile.owner = owner_user
+                profile.save()
             except User.DoesNotExist:
                 pass 
 
