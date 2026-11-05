@@ -1,3 +1,5 @@
+# models.py
+
 from django.db import models
 from django.contrib.auth.models import User
 from django.db.models.signals import post_save
@@ -6,12 +8,13 @@ from django.dispatch import receiver
 class UserProfile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
     owner = models.ForeignKey(
-        User, 
-        on_delete=models.SET_NULL, 
-        null=True, 
-        blank=True, 
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
         related_name='sub_farmers'
-    ) 
+    )
+    phone = models.CharField(max_length=20, blank=True, null=True)  # <-- Added phone field
 
     def __str__(self):
         return f"Profile for {self.user.username}"
@@ -32,7 +35,7 @@ class SoilRecord(models.Model):
     plot = models.ForeignKey(FarmPlot, on_delete=models.CASCADE, related_name='records')
     soil_moisture = models.FloatField()
     soil_temperature = models.FloatField()
-    ec = models.FloatField(default=0.0) 
+    ec = models.FloatField(default=0.0)
     ph_level = models.FloatField()
     nitrogen = models.FloatField(default=0.0)
     phosphorus = models.FloatField(default=0.0)
