@@ -18,6 +18,10 @@ class UserSerializer(serializers.ModelSerializer):
             'id', 'username', 'password', 'old_password', 'first_name', 'last_name', 'name', 'email',
             'phone', 'role', 'is_active', 'is_staff', 'is_superuser', 'owner_id', 'owner_username'
         ]
+        extra_kwargs = {
+            'is_active': {'required': False},
+            'is_staff': {'required': False},
+        }
 
     def get_name(self, obj):
         full_name = f"{obj.first_name} {obj.last_name}".strip()
@@ -40,17 +44,17 @@ class UserSerializer(serializers.ModelSerializer):
         profile_data = validated_data.pop('profile', {})
         password = validated_data.pop('password', None)
         validated_data.pop('old_password', None)
-        
+       
         user = User.objects.create(**validated_data)
         if password:
             user.set_password(password)
             user.save()
-            
+           
         profile, _ = UserProfile.objects.get_or_create(user=user)
         if 'phone' in profile_data:
             profile.phone = profile_data['phone']
             profile.save()
-            
+           
         return user
 
     def update(self, instance, validated_data):
@@ -58,9 +62,10 @@ class UserSerializer(serializers.ModelSerializer):
         password = validated_data.pop('password', None)
         old_password = validated_data.pop('old_password', None)
 
+        # Safely update standard User fields present in validated_data
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
-            
+           
         if password:
             request = self.context.get('request')
             # Require and check old_password when a user updates their own password
@@ -70,12 +75,12 @@ class UserSerializer(serializers.ModelSerializer):
                 if not instance.check_password(old_password):
                     raise serializers.ValidationError({'old_password': 'Incorrect current password.'})
             instance.set_password(password)
-            
+           
         instance.save()
 
-        # Update phone number in UserProfile
-        profile, _ = UserProfile.objects.get_or_create(user=instance)
-        if 'phone' in profile_data:
+        # Update phone number in UserProfile if provided
+        if profile_data and 'phone' in profile_data:
+            profile, _ = UserProfile.objects.get_or_create(user=instance)
             profile.phone = profile_data['phone']
             profile.save()
 

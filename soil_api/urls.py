@@ -8,6 +8,10 @@ router.register(r'users', views.UserViewSet, basename='user')
 urlpatterns = [
     path('', include(router.urls)),
 
+    # Registration & Verification Endpoints (In-App Flow)
+    path('send-otp/', views.send_registration_otp, name='send-otp'),
+    path('verify-register/', views.verify_and_register, name='verify-register'),
+
     path('plots/', views.plot_manager, name='plot-list'),
     path('plots/admin-manageable/', views.admin_manageable_plots, name='admin-manageable-plots'),
     path('plots/<int:pk>/', views.plot_detail_manager, name='plot-detail'),
@@ -21,6 +25,6 @@ urlpatterns = [
     path('user/', views.current_user, name='current-user'),
 
     path('register-web/', views.register_user_web, name='register-user-web'),
-    path('register/', views.register_user, name='api-register-user'), # Correctly maps to /api/register/
+    path('register/', views.register_user, name='api-register-user'),
     path('api-token-auth/', views.CustomObtainAuthToken.as_view(), name='api-token-auth'),
 ]
