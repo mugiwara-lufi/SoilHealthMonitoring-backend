@@ -5,8 +5,13 @@ from django.contrib.auth.models import User
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 
+
 class UserProfile(models.Model):
-    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
+    user = models.OneToOneField(
+        User,
+        on_delete=models.CASCADE,
+        related_name='profile'
+    )
     owner = models.ForeignKey(
         User,
         on_delete=models.SET_NULL,
@@ -14,14 +19,18 @@ class UserProfile(models.Model):
         blank=True,
         related_name='sub_farmers'
     )
-    phone = models.CharField(max_length=20, blank=True, null=True)  # <-- Added phone field
+    phone = models.CharField(max_length=20, blank=True, null=True)
 
     def __str__(self):
         return f"Profile for {self.user.username}"
 
 
 class FarmPlot(models.Model):
-    farmer = models.ForeignKey(User, on_delete=models.CASCADE, related_name='farm_plots')
+    farmer = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='farm_plots'
+    )
     name = models.CharField(max_length=100)
     crop_type = models.CharField(max_length=100)
     sensor_id = models.CharField(max_length=50, blank=True, null=True)
@@ -31,8 +40,43 @@ class FarmPlot(models.Model):
         return f"{self.name} ({self.sensor_id or 'No Sensor'})"
 
 
+class SensorDevice(models.Model):
+    sensor_id = models.CharField(max_length=100, unique=True)
+
+    owner = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="owned_sensors"
+    )
+
+    configured_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="configured_sensors"
+    )
+
+    plot = models.OneToOneField(
+        FarmPlot,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="registered_sensor"
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.sensor_id
+
+
 class SoilRecord(models.Model):
-    plot = models.ForeignKey(FarmPlot, on_delete=models.CASCADE, related_name='records')
+    plot = models.ForeignKey(
+        FarmPlot,
+        on_delete=models.CASCADE,
+        related_name='records'
+    )
     soil_moisture = models.FloatField()
     soil_temperature = models.FloatField()
     ec = models.FloatField(default=0.0)

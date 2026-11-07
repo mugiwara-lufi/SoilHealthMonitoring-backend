@@ -1,10 +1,12 @@
 import random
 import requests
+import os
 from datetime import timedelta
 
 from django.shortcuts import render, redirect
 from django.contrib.auth import login
 from django.contrib.auth.models import User
+from django.db import transaction
 from django.db.models import Avg, Prefetch, Q
 from django.db.models.functions import TruncDay, TruncHour
 from django.utils import timezone
@@ -20,11 +22,12 @@ from rest_framework.response import Response
 from rest_framework.authtoken.views import ObtainAuthToken
 from rest_framework.authtoken.models import Token
 
-from .models import FarmPlot, SoilRecord, UserProfile
+from .models import FarmPlot, SoilRecord, UserProfile, SensorDevice
 from .serializers import UserSerializer, FarmPlotSerializer, SoilRecordSerializer, RegisterSerializer
 from .forms import UserRegistrationForm
 
 SUPABASE_URL = "https://fpisfwcphgjcvxomzpko.supabase.co/rest/v1/soil_records"
+SUPABASE_COMMANDS_URL = "https://fpisfwcphgjcvxomzpko.supabase.co/rest/v1/device_commands"
 SUPABASE_KEY = "sb_publishable_cyQgbi_v02dkhswabEBWoQ_3exGPlaK"
 
 
@@ -390,6 +393,12 @@ def plot_detail_manager(request, pk):
     if not (request.user.is_superuser or is_owner or is_managing_admin):
         return Response({"error": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
 
+    if 'sensor_id' in request.data:
+        return Response(
+        {"error": "Use /api/sensors/claim/ or /api/sensors/disconnect/ to change sensor assignments."},
+        status=status.HTTP_400_BAD_REQUEST
+    )
+
     if request.method == 'GET':
         serializer = FarmPlotSerializer(plot)
         return Response(serializer.data)
@@ -546,3 +555,506 @@ def get_supabase_records(request):
             )
     except Exception as e:
         return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+
+# ---------------------------------------------------------------------
+# SENSOR MANAGEMENT VIEWS
+#
+# Requires SensorDevice in models.py with fields:
+# sensor_id (unique), owner (User FK), configured_by (nullable User FK),
+# and plot (nullable OneToOneField to FarmPlot).
+# ---------------------------------------------------------------------
+
+def _sensor_account_owner(user):
+    """Return the root Farm Owner for a user, or the user themselves."""
+    profile = (
+        UserProfile.objects
+        .filter(user=user)
+        .select_related("owner")
+        .first()
+    )
+    return profile.owner if profile and profile.owner_id else user
+
+
+def _user_can_manage_plot(user, plot):
+    """Allow the plot's farmer, its Farm Owner, or a superuser."""
+    if user.is_superuser or plot.farmer_id == user.id:
+        return True
+
+    return UserProfile.objects.filter(
+        user=plot.farmer,
+        owner=user
+    ).exists()
+
+
+def _supabase_headers():
+    return {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": "application/json",
+    }
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def register_sensor(request):
+    """Register a sensor to the user's Farm Owner account."""
+    sensor_id = str(request.data.get("sensor_id", "")).strip()
+
+    if not sensor_id:
+        return Response(
+            {"error": "sensor_id is required."},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    account_owner = _sensor_account_owner(request.user)
+
+    sensor, created = SensorDevice.objects.get_or_create(
+        sensor_id=sensor_id,
+        defaults={
+            "owner": account_owner,
+            "configured_by": request.user,
+            "plot": None,
+        }
+    )
+
+    if sensor.owner_id != account_owner.id:
+        return Response(
+            {"error": "This sensor is already registered to another Farm Owner account."},
+            status=status.HTTP_403_FORBIDDEN
+        )
+
+    # Sensor visibility and management belong to the exact account that
+    # originally configured it. Never transfer this ownership implicitly.
+    if sensor.configured_by_id != request.user.id:
+        return Response(
+            {"error": "This sensor was configured by another account and cannot be accessed here."},
+            status=status.HTTP_403_FORBIDDEN
+        )
+
+    return Response(
+        {
+            "message": (
+                "Sensor registered successfully."
+                if created
+                else "Sensor is already registered to your account."
+            ),
+            "sensor_id": sensor.sensor_id,
+            "assigned_plot_id": sensor.plot_id,
+            "created": created,
+        },
+        status=status.HTTP_201_CREATED if created else status.HTTP_200_OK
+    )
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def available_sensors(request):
+    """
+    Return only unassigned sensors registered to this Farm Owner account
+    AND configured by the currently authenticated account. Sensors owned
+    by another account or configured by another account are never exposed.
+    """
+    account_owner = _sensor_account_owner(request.user)
+    plot_id = request.query_params.get("plot_id")
+
+    if plot_id:
+        try:
+            plot = FarmPlot.objects.get(pk=plot_id)
+        except (FarmPlot.DoesNotExist, TypeError, ValueError):
+            return Response(
+                {"error": "Plot not found."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        if not _user_can_manage_plot(request.user, plot):
+            return Response(
+                {"error": "You cannot access this plot."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+    # Only unassigned sensors are available.
+    sensors = SensorDevice.objects.filter(
+        owner=account_owner,
+        configured_by=request.user,
+        plot__isnull=True
+    ).order_by("sensor_id")
+
+    # Exclude older assignments that exist in FarmPlot.sensor_id
+    # but may not have been saved in SensorDevice.plot.
+    assigned_sensor_ids = set(
+        FarmPlot.objects.exclude(
+            sensor_id__isnull=True
+        ).exclude(
+            sensor_id=""
+        ).values_list("sensor_id", flat=True)
+    )
+
+    data = [
+        {
+            "sensor_id": sensor.sensor_id,
+            "assigned_plot_id": None,
+            "is_connected": False,
+            "configured_by_id": sensor.configured_by_id,
+        }
+        for sensor in sensors
+        if sensor.sensor_id not in assigned_sensor_ids
+    ]
+
+    return Response(data, status=status.HTTP_200_OK)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def claim_sensor(request):
+    """Connect a registered sensor to exactly one plot."""
+    sensor_id = str(request.data.get("sensor_id", "")).strip()
+    plot_id = request.data.get("plot_id")
+
+    if not sensor_id or not plot_id:
+        return Response(
+            {"error": "Both sensor_id and plot_id are required."},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    try:
+        with transaction.atomic():
+            sensor = SensorDevice.objects.select_for_update().get(
+                sensor_id=sensor_id
+            )
+            plot = FarmPlot.objects.select_for_update().get(pk=plot_id)
+
+            account_owner = _sensor_account_owner(request.user)
+
+            if sensor.owner_id != account_owner.id:
+                return Response(
+                    {"error": "This sensor is not registered to your Farm Owner account."},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+
+            if sensor.configured_by_id != request.user.id:
+                return Response(
+                    {"error": "Only the account that configured this sensor can connect it."},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+
+            if not _user_can_manage_plot(request.user, plot):
+                return Response(
+                    {"error": "You cannot manage this plot."},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+
+            # Do not allow a sensor assigned to another plot.
+            if sensor.plot_id and sensor.plot_id != plot.id:
+                return Response(
+                    {
+                        "error": (
+                            f"{sensor_id} is already connected to another plot. "
+                            "Disconnect it first."
+                        )
+                    },
+                    status=status.HTTP_409_CONFLICT
+                )
+
+            # Check legacy FarmPlot assignments too.
+            legacy_assignment = FarmPlot.objects.filter(
+                sensor_id=sensor_id
+            ).exclude(pk=plot.pk).first()
+
+            if legacy_assignment:
+                return Response(
+                    {
+                        "error": (
+                            f"{sensor_id} is already assigned to "
+                            f"{legacy_assignment.name}."
+                        )
+                    },
+                    status=status.HTTP_409_CONFLICT
+                )
+
+            # A plot can only have one sensor.
+            other_sensor = SensorDevice.objects.filter(
+                plot=plot
+            ).exclude(pk=sensor.pk).first()
+
+            if other_sensor:
+                return Response(
+                    {"error": "This plot already has another sensor assigned."},
+                    status=status.HTTP_409_CONFLICT
+                )
+
+            if plot.sensor_id and plot.sensor_id != sensor_id:
+                return Response(
+                    {"error": "This plot already has another sensor assigned."},
+                    status=status.HTTP_409_CONFLICT
+                )
+
+            sensor.plot = plot
+            sensor.save(update_fields=["plot"])
+
+            plot.sensor_id = sensor_id
+            plot.save(update_fields=["sensor_id"])
+
+    except SensorDevice.DoesNotExist:
+        return Response(
+            {"error": "Sensor is not registered to your account."},
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+    except FarmPlot.DoesNotExist:
+        return Response(
+            {"error": "Plot not found."},
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+    except (TypeError, ValueError):
+        return Response(
+            {"error": "Invalid plot_id."},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    return Response(
+        {
+            "message": "Sensor connected successfully.",
+            "sensor_id": sensor.sensor_id,
+            "plot_id": plot.id,
+        },
+        status=status.HTTP_200_OK
+    )
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def disconnect_sensor(request):
+    """
+    Remove the sensor from its current plot but retain its
+    registration and account ownership, and send a Wi-Fi reset command.
+    """
+    sensor_id = str(request.data.get("sensor_id", "")).strip()
+    plot_id = request.data.get("plot_id")
+
+    if not sensor_id:
+        return Response(
+            {"error": "sensor_id is required."},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    try:
+        with transaction.atomic():
+            sensor = SensorDevice.objects.select_for_update().get(
+                sensor_id=sensor_id
+            )
+
+            account_owner = _sensor_account_owner(request.user)
+
+            if sensor.owner_id != account_owner.id:
+                return Response(
+                    {"error": "This sensor is not registered to your Farm Owner account."},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+
+            if sensor.configured_by_id != request.user.id:
+                return Response(
+                    {"error": "Only the account that configured this sensor can disconnect it."},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+
+            if sensor.plot_id is None:
+                return Response(
+                    {
+                        "message": "Sensor is already disconnected.",
+                        "sensor_id": sensor.sensor_id,
+                    },
+                    status=status.HTTP_200_OK
+                )
+
+            if plot_id is not None and str(sensor.plot_id) != str(plot_id):
+                return Response(
+                    {"error": "The supplied plot_id does not match the sensor's assignment."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            plot = FarmPlot.objects.select_for_update().get(
+                pk=sensor.plot_id
+            )
+
+            if not _user_can_manage_plot(request.user, plot):
+                return Response(
+                    {"error": "You cannot manage the currently assigned plot."},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+
+            sensor.plot = None
+            sensor.save(update_fields=["plot"])
+
+            if plot.sensor_id == sensor.sensor_id:
+                plot.sensor_id = None
+                plot.save(update_fields=["sensor_id"])
+
+        # Create the remote reset command in Supabase
+        command_payload = {
+            "sensor_id": sensor.sensor_id,
+            "command": "RESET_WIFI",
+            "status": "PENDING"
+        }
+        
+        try:
+            cmd_resp = requests.post(
+                SUPABASE_COMMANDS_URL,
+                headers=_supabase_headers(),
+                json=command_payload,
+                timeout=10
+            )
+            if cmd_resp.status_code in (200, 201, 204):
+                wifi_status = "sent"
+            else:
+                wifi_status = f"not_sent_status_{cmd_resp.status_code}"
+        except Exception as e:
+            wifi_status = "not_sent_error"
+
+    except SensorDevice.DoesNotExist:
+        return Response(
+            {"error": "Sensor not found."},
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+    except FarmPlot.DoesNotExist:
+        # Clear stale assignment if its plot was deleted.
+        sensor.plot = None
+        sensor.save(update_fields=["plot"])
+        wifi_status = "not_sent_stale"
+
+    except (TypeError, ValueError):
+        return Response(
+            {"error": "Invalid plot_id."},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    return Response(
+        {
+            "message": "Sensor disconnected. Registration and ownership were retained.",
+            "sensor_id": sensor.sensor_id,
+            "wifi_reset_command": wifi_status
+        },
+        status=status.HTTP_200_OK
+    )
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def latest_sensor_reading(request):
+    """
+    Retrieve the latest reading directly from Supabase for the
+    sensor assigned to the requested plot.
+    """
+    plot_id = request.query_params.get("plot_id")
+
+    if not plot_id:
+        return Response(
+            {"error": "plot_id query parameter is required."},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    try:
+        plot = FarmPlot.objects.get(pk=plot_id)
+
+    except (FarmPlot.DoesNotExist, TypeError, ValueError):
+        return Response(
+            {"error": "Plot not found."},
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+    if not _user_can_manage_plot(request.user, plot):
+        return Response(
+            {"error": "You cannot access this plot."},
+            status=status.HTTP_403_FORBIDDEN
+        )
+
+    account_owner = _sensor_account_owner(request.user)
+
+    sensor = SensorDevice.objects.filter(
+        owner=account_owner,
+        configured_by=request.user,
+        plot=plot
+    ).first()
+
+    # Verify both sides of the assignment.
+    if (
+        not sensor
+        or not plot.sensor_id
+        or sensor.sensor_id != plot.sensor_id
+    ):
+        return Response(
+            {
+                "sensor_id": None,
+                "reading": None,
+                "message": "No registered sensor is connected to this plot."
+            },
+            status=status.HTTP_200_OK
+        )
+
+    params = {
+        "select": "*",
+        "sensor_id": f"eq.{sensor.sensor_id}",
+        "order": "timestamp.desc",
+        "limit": "1",
+    }
+
+    try:
+        response = requests.get(
+            SUPABASE_URL,
+            headers=_supabase_headers(),
+            params=params,
+            timeout=15
+        )
+
+        if response.status_code not in (200, 206):
+            return Response(
+                {
+                    "error": "Failed to fetch readings from Supabase.",
+                    "details": response.text,
+                },
+                status=status.HTTP_502_BAD_GATEWAY
+            )
+
+        rows = response.json()
+
+        if not isinstance(rows, list):
+            return Response(
+                {"error": "Unexpected response format from Supabase."},
+                status=status.HTTP_502_BAD_GATEWAY
+            )
+
+        if not rows:
+            return Response(
+                {
+                    "sensor_id": sensor.sensor_id,
+                    "reading": None,
+                    "message": "No readings have been uploaded by this sensor yet."
+                },
+                status=status.HTTP_200_OK
+            )
+
+        return Response(
+            {
+                "sensor_id": sensor.sensor_id,
+                "reading": rows[0],
+            },
+            status=status.HTTP_200_OK
+        )
+
+    except requests.RequestException as exc:
+        return Response(
+            {
+                "error": "Could not connect to Supabase.",
+                "details": str(exc),
+            },
+            status=status.HTTP_502_BAD_GATEWAY
+        )
+
+    except ValueError:
+        return Response(
+            {"error": "Supabase returned invalid JSON."},
+            status=status.HTTP_502_BAD_GATEWAY
+        )
