@@ -195,6 +195,10 @@ class CustomObtainAuthToken(ObtainAuthToken):
         token, created = Token.objects.get_or_create(user=user)
         role = 'admin' if (user.is_staff or user.is_superuser) else 'user'
         phone_num = user.profile.phone if hasattr(user, 'profile') and user.profile.phone else ''
+        
+        # FIX: Extract the profile image URL without changing the overall response structure
+        user_data = UserSerializer(user, context={'request': request}).data
+        profile_image = user_data.get('profile_image', None)
        
         return Response({
             'token': token.key,
@@ -205,7 +209,8 @@ class CustomObtainAuthToken(ObtainAuthToken):
             'email': user.email,
             'phone': phone_num,
             'is_staff': user.is_staff or user.is_superuser,
-            'role': role
+            'role': role,
+            'profile_image': profile_image  # <-- Just appending this to your existing fields
         })
 
 
@@ -898,7 +903,7 @@ def disconnect_sensor(request):
             "command": "RESET_WIFI",
             "status": "PENDING"
         }
-        
+       
         try:
             cmd_resp = requests.post(
                 SUPABASE_COMMANDS_URL,

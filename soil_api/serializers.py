@@ -11,12 +11,15 @@ class UserSerializer(serializers.ModelSerializer):
     owner_id = serializers.SerializerMethodField()
     owner_username = serializers.SerializerMethodField()
     phone = serializers.CharField(source='profile.phone', required=False, allow_blank=True, allow_null=True)
+    
+    # Dynamically generates the absolute HTTP URL for the profile image
+    profile_image = serializers.SerializerMethodField()
 
     class Meta:
         model = User
         fields = [
             'id', 'username', 'password', 'old_password', 'first_name', 'last_name', 'name', 'email',
-            'phone', 'role', 'is_active', 'is_staff', 'is_superuser', 'owner_id', 'owner_username'
+            'phone', 'profile_image', 'role', 'is_active', 'is_staff', 'is_superuser', 'owner_id', 'owner_username'
         ]
         extra_kwargs = {
             'is_active': {'required': False},
@@ -40,6 +43,15 @@ class UserSerializer(serializers.ModelSerializer):
             return obj.profile.owner.username
         return None
 
+    def get_profile_image(self, obj):
+        if hasattr(obj, 'profile') and obj.profile.profile_image:
+            request = self.context.get('request')
+            image_url = obj.profile.profile_image.url
+            if request:
+                return request.build_absolute_uri(image_url)
+            return f"http://10.205.210.28:8000{image_url}"
+        return None
+
     def create(self, validated_data):
         profile_data = validated_data.pop('profile', {})
         password = validated_data.pop('password', None)
@@ -53,7 +65,9 @@ class UserSerializer(serializers.ModelSerializer):
         profile, _ = UserProfile.objects.get_or_create(user=user)
         if 'phone' in profile_data:
             profile.phone = profile_data['phone']
-            profile.save()
+        if 'profile_image' in profile_data:
+            profile.profile_image = profile_data['profile_image']
+        profile.save()
            
         return user
 
@@ -62,13 +76,11 @@ class UserSerializer(serializers.ModelSerializer):
         password = validated_data.pop('password', None)
         old_password = validated_data.pop('old_password', None)
 
-        # Safely update standard User fields present in validated_data
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
            
         if password:
             request = self.context.get('request')
-            # Require and check old_password when a user updates their own password
             if request and request.user == instance:
                 if not old_password:
                     raise serializers.ValidationError({'old_password': 'Current password is required.'})
@@ -78,10 +90,20 @@ class UserSerializer(serializers.ModelSerializer):
            
         instance.save()
 
-        # Update phone number in UserProfile if provided
-        if profile_data and 'phone' in profile_data:
+        # Handle file upload or text updates for profile
+        if profile_data or 'profile_image' in self.initial_data or 'phone' in self.initial_data:
             profile, _ = UserProfile.objects.get_or_create(user=instance)
-            profile.phone = profile_data['phone']
+            
+            # Check request FILES for multipart image upload
+            request = self.context.get('request')
+            if request and request.FILES.get('profile_image'):
+                profile.profile_image = request.FILES.get('profile_image')
+            
+            if 'phone' in profile_data:
+                profile.phone = profile_data['phone']
+            elif request and 'phone' in request.data:
+                profile.phone = request.data.get('phone')
+                
             profile.save()
 
         return instance

@@ -120,9 +120,13 @@ USE_I18N = True
 USE_TZ = True
 
 
-# Static files
+# Add this near your STATIC_URL settings in settings.py
 
 STATIC_URL = 'static/'
+
+# --- MEDIA FILES CONFIGURATION ---
+MEDIA_URL = '/media/'
+MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
 CORS_ALLOW_ALL_ORIGINS = True
 

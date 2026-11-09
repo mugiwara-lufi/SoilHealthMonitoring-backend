@@ -20,6 +20,7 @@ class UserProfile(models.Model):
         related_name='sub_farmers'
     )
     phone = models.CharField(max_length=20, blank=True, null=True)
+    profile_image = models.ImageField(upload_to='profiles/', blank=True, null=True)  # <--- Added for profile picture
 
     def __str__(self):
         return f"Profile for {self.user.username}"
