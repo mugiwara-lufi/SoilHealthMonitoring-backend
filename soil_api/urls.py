@@ -1,10 +1,8 @@
-# config/urls.py (or your main project urls.py)
-
 from django.conf import settings
 from django.conf.urls.static import static
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from soil_api import views
+from soil_api import views, password_reset
 
 router = DefaultRouter()
 router.register(r'users', views.UserViewSet, basename='user')
@@ -15,6 +13,11 @@ urlpatterns = [
     # Registration & Verification
     path('send-otp/', views.send_registration_otp, name='send-otp'),
     path('verify-register/', views.verify_and_register, name='verify-register'),
+
+    # Forgot Password & Email OTP Verification
+    path('password-reset/send-otp/', password_reset.send_password_reset_otp, name='password-reset-send-otp'),
+    path('password-reset/verify-otp/', password_reset.verify_password_reset_otp, name='password-reset-verify-otp'),
+    path('password-reset/confirm/', password_reset.confirm_password_reset, name='password-reset-confirm'),
 
     # Farm Plots
     path('plots/', views.plot_manager, name='plot-list'),
